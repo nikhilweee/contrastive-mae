@@ -1,9 +1,9 @@
-**Updates**
+## Updates
 
 The following updates have been made to the original repository
 
-[x] Added a contrastive loss  
-[x] Train on CIFAR10 instead of ImageNet
+* [x] Added a contrastive loss
+* [x] Train on CIFAR10 instead of ImageNet
 
 The training script takes an additional argument `--loss_type`, which can be either of:
 * `cont`: use a contrastive loss

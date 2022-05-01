@@ -217,8 +217,6 @@ class MaskedAutoencoderViT(nn.Module):
 
         targets = torch.arange(batch, device=latent.device)
         cont_loss = self.crossentropy(sim, targets) * 0.1
-        if not torch.isfinite(cont_loss):
-            import pudb; pudb.set_trace()
         return cont_loss
 
     def forward_loss(self, imgs, pred, mask):
