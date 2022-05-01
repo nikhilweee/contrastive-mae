@@ -1,3 +1,24 @@
+**Updates**
+
+The following updates have been made to the original repository
+
+[x] Added a contrastive loss  
+[x] Train on CIFAR10 instead of ImageNet
+
+The training script takes an additional argument `--loss_type`, which can be either of:
+* `cont`: use a contrastive loss
+* `rec`: use the original reconstruction loss
+* `both`: use both losses
+
+To pretrain using a contrastive loss on CIFAR10, run
+
+```
+# loss_type can be cont, rec or both
+python main_pretrain.py --loss_type cont
+```
+
+Original README follows below.
+
 ## Masked Autoencoders: A PyTorch Implementation
 
 <p align="center">
