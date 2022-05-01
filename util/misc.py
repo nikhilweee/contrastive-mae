@@ -223,13 +223,13 @@ def init_distributed_mode(args):
         os.environ['RANK'] = str(args.rank)
         os.environ['WORLD_SIZE'] = str(args.world_size)
         # ["RANK", "WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "LOCAL_RANK"]
-    elif 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        args.rank = int(os.environ["RANK"])
-        args.world_size = int(os.environ['WORLD_SIZE'])
-        args.gpu = int(os.environ['LOCAL_RANK'])
-    elif 'SLURM_PROCID' in os.environ:
-        args.rank = int(os.environ['SLURM_PROCID'])
-        args.gpu = args.rank % torch.cuda.device_count()
+    # elif 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+    #     args.rank = int(os.environ["RANK"])
+    #     args.world_size = int(os.environ['WORLD_SIZE'])
+    #     args.gpu = int(os.environ['LOCAL_RANK'])
+    # elif 'SLURM_PROCID' in os.environ:
+    #     args.rank = int(os.environ['SLURM_PROCID'])
+    #     args.gpu = args.rank % torch.cuda.device_count()
     else:
         print('Not using distributed mode')
         setup_for_distributed(is_master=True)  # hack
@@ -254,8 +254,15 @@ class NativeScalerWithGradNormCount:
     def __init__(self):
         self._scaler = torch.cuda.amp.GradScaler()
 
-    def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True):
+    def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True, log_writer=None):
         self._scaler.scale(loss).backward(create_graph=create_graph)
+
+        parameters = list(parameters)
+        norm = [torch.norm(param.grad.detach()) for param in parameters if param.grad is not None]
+        norm = torch.norm(torch.stack(norm))
+        log_writer.add_scalar('norm/grad', norm, log_writer.step)
+        parameters = (param for param in parameters)
+
         if update_grad:
             if clip_grad is not None:
                 assert parameters is not None

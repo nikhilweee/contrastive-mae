@@ -46,6 +46,11 @@ class MaskedAutoencoderViT(nn.Module):
         # MAE decoder specifics
         self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
 
+        # Contrasive Loss
+        self.query_encoder = nn.Linear(embed_dim, decoder_embed_dim // 16)
+        self.key_encoder = nn.Linear(embed_dim, decoder_embed_dim // 16)
+        self.crossentropy = nn.CrossEntropyLoss()
+
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
 
         self.decoder_pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
@@ -195,6 +200,27 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x
 
+    def contrastive_loss(self, latent, log_writer):
+        # second half of the batch is repeated
+        batch = latent.size(0) // 2
+
+        q_latent = self.query_encoder(latent[:batch])
+        k_latent = self.key_encoder(latent[batch:])
+        q_latent = q_latent.flatten(1)
+        k_latent = k_latent.flatten(1)
+
+        # Calculate scores
+        sim = torch.matmul(q_latent, k_latent.T)
+
+        log_writer.add_scalar('norm/latent', latent.norm(), log_writer.step)
+        log_writer.add_scalar('norm/sim', sim.norm(), log_writer.step)
+
+        targets = torch.arange(batch, device=latent.device)
+        cont_loss = self.crossentropy(sim, targets) * 0.1
+        if not torch.isfinite(cont_loss):
+            import pudb; pudb.set_trace()
+        return cont_loss
+
     def forward_loss(self, imgs, pred, mask):
         """
         imgs: [N, 3, H, W]
@@ -207,17 +233,20 @@ class MaskedAutoencoderViT(nn.Module):
             var = target.var(dim=-1, keepdim=True)
             target = (target - mean) / (var + 1.e-6)**.5
 
-        loss = (pred - target) ** 2
-        loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
+        # Reconstruction Loss
+        rec_loss = (pred - target) ** 2
+        rec_loss = rec_loss.mean(dim=-1)  # [N, L], mean loss per patch
 
-        loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        return loss
+        rec_loss = (rec_loss * mask).sum() / mask.sum()  # mean loss on removed patches
+        return rec_loss
 
-    def forward(self, imgs, mask_ratio=0.75):
+    def forward(self, imgs, mask_ratio=0.75, log_writer=None, metric_logger=None):
         latent, mask, ids_restore = self.forward_encoder(imgs, mask_ratio)
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
-        loss = self.forward_loss(imgs, pred, mask)
-        return loss, pred, mask
+        rec_loss = self.forward_loss(imgs, pred, mask)
+        cont_loss = self.contrastive_loss(latent, log_writer)
+
+        return rec_loss, cont_loss, pred, mask
 
 
 def mae_vit_base_patch16_dec512d8b(**kwargs):

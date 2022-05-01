@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 import torch
+import torchvision
 import torch.backends.cudnn as cudnn
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
@@ -29,6 +30,7 @@ import timm.optim.optim_factory as optim_factory
 
 import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
+from util.sampler import DoubleBatchSampler
 
 import models_mae
 
@@ -37,15 +39,18 @@ from engine_pretrain import train_one_epoch
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=64, type=int,
+    parser.add_argument('--batch_size', default=192, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
-    parser.add_argument('--epochs', default=400, type=int)
+    parser.add_argument('--epochs', default=50, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
     # Model parameters
     parser.add_argument('--model', default='mae_vit_large_patch16', type=str, metavar='MODEL',
                         help='Name of model to train')
+
+    parser.add_argument('--loss_type', default='rec', type=str, choices=["rec", "cont", "both"],
+                        help='Choice of loss: [%(choices)s]')
 
     parser.add_argument('--input_size', default=224, type=int,
                         help='images input size')
@@ -68,16 +73,16 @@ def get_args_parser():
     parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
 
-    parser.add_argument('--warmup_epochs', type=int, default=40, metavar='N',
+    parser.add_argument('--warmup_epochs', type=int, default=5, metavar='N',
                         help='epochs to warmup LR')
 
     # Dataset parameters
     parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=str,
                         help='dataset path')
 
-    parser.add_argument('--output_dir', default='./output_dir',
+    parser.add_argument('--output_dir', default='./runs/test',
                         help='path where to save, empty for no saving')
-    parser.add_argument('--log_dir', default='./output_dir',
+    parser.add_argument('--log_dir', default='./runs/test',
                         help='path where to tensorboard log')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
@@ -87,7 +92,7 @@ def get_args_parser():
 
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
-    parser.add_argument('--num_workers', default=10, type=int)
+    parser.add_argument('--num_workers', default=0, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
@@ -124,19 +129,26 @@ def main(args):
             transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-    dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
+            # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            # CIFAR needs a different normalization
+            transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
+    # dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
+    dataset_train = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
     print(dataset_train)
 
-    if True:  # args.distributed:
+    if args.distributed:
         num_tasks = misc.get_world_size()
         global_rank = misc.get_rank()
         sampler_train = torch.utils.data.DistributedSampler(
             dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
         )
         print("Sampler_train = %s" % str(sampler_train))
+        batch_sampler_train = None
     else:
+        global_rank = misc.get_rank()
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
+        batch_sampler_train = DoubleBatchSampler(sampler_train, batch_size=args.batch_size, drop_last=True)
+
 
     if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
@@ -144,14 +156,24 @@ def main(args):
     else:
         log_writer = None
 
-    data_loader_train = torch.utils.data.DataLoader(
-        dataset_train, sampler=sampler_train,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=True,
-    )
-    
+
+    if batch_sampler_train is not None:
+        data_loader_train = torch.utils.data.DataLoader(
+            dataset_train,
+            batch_sampler = batch_sampler_train,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_mem,
+        )
+    else:
+        data_loader_train = torch.utils.data.DataLoader(
+            dataset_train, sampler=sampler_train,
+            batch_sampler = batch_sampler_train,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_mem,
+            drop_last=True,
+        )
+
     # define the model
     model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
 
@@ -217,5 +239,6 @@ if __name__ == '__main__':
     args = get_args_parser()
     args = args.parse_args()
     if args.output_dir:
+        args.log_dir = args.output_dir
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     main(args)

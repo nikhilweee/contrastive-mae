@@ -38,6 +38,10 @@ def train_one_epoch(model: torch.nn.Module,
 
     for data_iter_step, (samples, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
 
+        if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
+            epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
+            log_writer.step = epoch_1000x
+
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
@@ -45,17 +49,30 @@ def train_one_epoch(model: torch.nn.Module,
         samples = samples.to(device, non_blocking=True)
 
         with torch.cuda.amp.autocast():
-            loss, _, _ = model(samples, mask_ratio=args.mask_ratio)
+            rec_loss, cont_loss, _, _ = model(samples, mask_ratio=args.mask_ratio,
+                log_writer=log_writer, metric_logger=metric_logger)
+
+        if args.loss_type == 'rec':
+            loss = rec_loss
+            metric_logger.update(rec_loss=rec_loss)
+
+        if args.loss_type == 'cont':
+            loss = cont_loss
+            metric_logger.update(cont_loss=cont_loss)
+
+        if args.loss_type == 'both':
+            loss = rec_loss + cont_loss
+            metric_logger.update(rec_loss=rec_loss)
+            metric_logger.update(cont_loss=cont_loss)
 
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-            sys.exit(1)
+            print("Loss is {}".format(loss_value))
 
         loss /= accum_iter
-        loss_scaler(loss, optimizer, parameters=model.parameters(),
-                    update_grad=(data_iter_step + 1) % accum_iter == 0)
+        loss_scaler(loss, optimizer, parameters=model.parameters(), clip_grad=5,
+                    update_grad=(data_iter_step + 1) % accum_iter == 0, log_writer=log_writer)
         if (data_iter_step + 1) % accum_iter == 0:
             optimizer.zero_grad()
 
@@ -72,8 +89,18 @@ def train_one_epoch(model: torch.nn.Module,
             This calibrates different curves when batch size changes.
             """
             epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
-            log_writer.add_scalar('train_loss', loss_value_reduce, epoch_1000x)
+            log_writer.add_scalar('loss/train_loss', loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('lr', lr, epoch_1000x)
+
+            if args.loss_type == 'rec':
+                log_writer.add_scalar('loss/rec_loss', rec_loss, epoch_1000x)
+
+            if args.loss_type == 'cont':
+                log_writer.add_scalar('loss/cont_loss', cont_loss, epoch_1000x)
+
+            if args.loss_type == 'both':
+                log_writer.add_scalar('loss/rec_loss', rec_loss, epoch_1000x)
+                log_writer.add_scalar('loss/cont_loss', cont_loss, epoch_1000x)
 
 
     # gather the stats from all processes
