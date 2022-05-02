@@ -14,14 +14,15 @@ import PIL
 from torchvision import datasets, transforms
 
 from timm.data import create_transform
-from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
+# from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
 
 def build_dataset(is_train, args):
     transform = build_transform(is_train, args)
 
-    root = os.path.join(args.data_path, 'train' if is_train else 'val')
-    dataset = datasets.ImageFolder(root, transform=transform)
+    # root = os.path.join(args.data_path, 'train' if is_train else 'val')
+    # dataset = datasets.ImageFolder(root, transform=transform)
+    dataset = datasets.CIFAR10(root='./data', train=is_train, download=True, transform=transform)
 
     print(dataset)
 
@@ -29,8 +30,10 @@ def build_dataset(is_train, args):
 
 
 def build_transform(is_train, args):
-    mean = IMAGENET_DEFAULT_MEAN
-    std = IMAGENET_DEFAULT_STD
+    # mean = IMAGENET_DEFAULT_MEAN
+    # std = IMAGENET_DEFAULT_STD
+    mean = (0.5, 0.5, 0.5)
+    std = (0.5, 0.5, 0.5)
     # train transform
     if is_train:
         # this should always dispatch to transforms_imagenet_train

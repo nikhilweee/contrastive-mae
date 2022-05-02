@@ -42,6 +42,10 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
     for data_iter_step, (samples, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
 
+        if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
+            epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
+            log_writer.step = epoch_1000x
+
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
@@ -65,7 +69,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         loss /= accum_iter
         loss_scaler(loss, optimizer, clip_grad=max_norm,
                     parameters=model.parameters(), create_graph=False,
-                    update_grad=(data_iter_step + 1) % accum_iter == 0)
+                    update_grad=(data_iter_step + 1) % accum_iter == 0, log_writer=log_writer)
         if (data_iter_step + 1) % accum_iter == 0:
             optimizer.zero_grad()
 
