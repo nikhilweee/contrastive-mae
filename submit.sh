@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:rtx8000:1
 #SBATCH --output="sbatch_logs/%A_%x.txt"
-#SBATCH --job-name=pretrain_cifar_192_both
+#SBATCH --job-name=pretrain_cifar_192_cont
 
 # The following options will not be applied
 # SBATCH --nodelist="gr*"
@@ -21,5 +21,6 @@ singularity exec \
     source /ext3/miniconda3/etc/profile.d/conda.sh;
     conda activate vit_mae;
     cd /home/nv2099/projects/vit_mae/mae;
-    python -u main_pretrain.py --epochs 50 --batch_size 192 --warmup_epochs 5 --loss_type both --output_dir runs/pretrain_cifar_both;
+    python -u main_pretrain.py --epochs 50 --batch_size 192 --warmup_epochs 5 \
+        --loss_type cont --output_dir runs/pretrain_cifar/cont_${SLURM_JOB_ID};
     "

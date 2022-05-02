@@ -49,7 +49,7 @@ class MaskedAutoencoderViT(nn.Module):
         # Contrasive Loss
         self.query_encoder = nn.Linear(embed_dim, decoder_embed_dim // 16)
         self.key_encoder = nn.Linear(embed_dim, decoder_embed_dim // 16)
-        self.crossentropy = nn.CrossEntropyLoss()
+        self.cont_loss = nn.CrossEntropyLoss()
 
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
 
@@ -204,10 +204,11 @@ class MaskedAutoencoderViT(nn.Module):
         # second half of the batch is repeated
         batch = latent.size(0) // 2
 
-        q_latent = self.query_encoder(latent[:batch])
-        k_latent = self.key_encoder(latent[batch:])
-        q_latent = q_latent.flatten(1)
-        k_latent = k_latent.flatten(1)
+        # q_latent = self.query_encoder(latent[:batch])
+        # k_latent = self.key_encoder(latent[batch:])
+
+        q_latent = latent[:batch].flatten(1)
+        k_latent = latent[batch:].flatten(1)
 
         # Calculate scores
         sim = torch.matmul(q_latent, k_latent.T)
@@ -216,7 +217,7 @@ class MaskedAutoencoderViT(nn.Module):
         log_writer.add_scalar('norm/sim', sim.norm(), log_writer.step)
 
         targets = torch.arange(batch, device=latent.device)
-        cont_loss = self.crossentropy(sim, targets) * 0.1
+        cont_loss = self.cont_loss(sim, targets) * 0.01
         return cont_loss
 
     def forward_loss(self, imgs, pred, mask):
