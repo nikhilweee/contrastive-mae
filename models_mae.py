@@ -201,23 +201,36 @@ class MaskedAutoencoderViT(nn.Module):
         return x
 
     def contrastive_loss(self, latent, log_writer):
+        if not latent.isfinite().all():
+            print('Latent is not finite')
+
         # second half of the batch is repeated
         batch = latent.size(0) // 2
 
-        # q_latent = self.query_encoder(latent[:batch])
-        # k_latent = self.key_encoder(latent[batch:])
+        q_latent = self.key_encoder(latent[:batch])
+        q_latent = q_latent.flatten(1)
+        k_latent = self.query_encoder(latent[batch:])
+        k_latent = k_latent.flatten(1)
 
-        q_latent = latent[:batch].flatten(1)
-        k_latent = latent[batch:].flatten(1)
+        q_latent = torch.nn.functional.normalize(q_latent)
+        k_latent = torch.nn.functional.normalize(k_latent)
 
         # Calculate scores
         sim = torch.matmul(q_latent, k_latent.T)
 
         log_writer.add_scalar('norm/latent', latent.norm(), log_writer.step)
         log_writer.add_scalar('norm/sim', sim.norm(), log_writer.step)
+        log_writer.add_scalar('norm/q_latent', q_latent.norm(), log_writer.step)
+        log_writer.add_scalar('norm/k_latent', k_latent.norm(), log_writer.step)
+
+        log_writer.add_histogram('hist/sim', sim.argmax(dim=-1), log_writer.step, bins=sim.size(0) * 2)
 
         targets = torch.arange(batch, device=latent.device)
-        cont_loss = self.cont_loss(sim, targets) * 0.01
+        cont_loss = self.cont_loss(sim, targets) * 0.1
+
+        if not torch.isfinite(cont_loss):
+            print('Cont loss is:', cont_loss.item())
+
         return cont_loss
 
     def forward_loss(self, imgs, pred, mask):

@@ -38,6 +38,9 @@ def train_one_epoch(model: torch.nn.Module,
 
     for data_iter_step, (samples, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
 
+        # if data_iter_step > print_freq:
+        #     torch.autograd.set_detect_anomaly(True)
+
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
             epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
             log_writer.step = epoch_1000x
@@ -55,11 +58,9 @@ def train_one_epoch(model: torch.nn.Module,
         if args.loss_type == 'rec':
             loss = rec_loss
             metric_logger.update(rec_loss=rec_loss)
-
         if args.loss_type == 'cont':
             loss = cont_loss
             metric_logger.update(cont_loss=cont_loss)
-
         if args.loss_type == 'both':
             loss = rec_loss + cont_loss
             metric_logger.update(rec_loss=rec_loss)
@@ -71,7 +72,7 @@ def train_one_epoch(model: torch.nn.Module,
             print("Loss is {}".format(loss_value))
 
         loss /= accum_iter
-        loss_scaler(loss, optimizer, parameters=model.parameters(), clip_grad=0.1,
+        loss_scaler(loss, optimizer, parameters=model.named_parameters(), clip_grad=0.1,
                     update_grad=(data_iter_step + 1) % accum_iter == 0, log_writer=log_writer)
         if (data_iter_step + 1) % accum_iter == 0:
             optimizer.zero_grad()
@@ -90,17 +91,9 @@ def train_one_epoch(model: torch.nn.Module,
             """
             epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
             log_writer.add_scalar('loss/train_loss', loss_value_reduce, epoch_1000x)
-            log_writer.add_scalar('lr', lr, epoch_1000x)
-
-            if args.loss_type == 'rec':
-                log_writer.add_scalar('loss/rec_loss', rec_loss, epoch_1000x)
-
-            if args.loss_type == 'cont':
-                log_writer.add_scalar('loss/cont_loss', cont_loss, epoch_1000x)
-
-            if args.loss_type == 'both':
-                log_writer.add_scalar('loss/rec_loss', rec_loss, epoch_1000x)
-                log_writer.add_scalar('loss/cont_loss', cont_loss, epoch_1000x)
+            log_writer.add_scalar('optim/lr', lr, epoch_1000x)
+            log_writer.add_scalar('loss/rec_loss', rec_loss, epoch_1000x)
+            log_writer.add_scalar('loss/cont_loss', cont_loss, epoch_1000x)
 
 
     # gather the stats from all processes

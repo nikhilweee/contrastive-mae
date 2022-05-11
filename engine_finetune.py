@@ -63,12 +63,11 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-            sys.exit(1)
+            print("Loss is {}".format(loss_value))
 
         loss /= accum_iter
         loss_scaler(loss, optimizer, clip_grad=max_norm,
-                    parameters=model.parameters(), create_graph=False,
+                    parameters=model.named_parameters(), create_graph=False,
                     update_grad=(data_iter_step + 1) % accum_iter == 0, log_writer=log_writer)
         if (data_iter_step + 1) % accum_iter == 0:
             optimizer.zero_grad()
@@ -90,8 +89,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             This calibrates different curves when batch size changes.
             """
             epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
-            log_writer.add_scalar('loss', loss_value_reduce, epoch_1000x)
-            log_writer.add_scalar('lr', max_lr, epoch_1000x)
+            log_writer.add_scalar('loss/loss', loss_value_reduce, epoch_1000x)
+            log_writer.add_scalar('optim/lr', max_lr, epoch_1000x)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()

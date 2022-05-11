@@ -231,8 +231,8 @@ def init_distributed_mode(args):
     #     args.rank = int(os.environ['SLURM_PROCID'])
     #     args.gpu = args.rank % torch.cuda.device_count()
     else:
-        print('Not using distributed mode')
         setup_for_distributed(is_master=True)  # hack
+        print('Not using distributed mode')
         args.distributed = False
         return
 
@@ -248,31 +248,52 @@ def init_distributed_mode(args):
     setup_for_distributed(args.rank == 0)
 
 
+def log_gradients(parameters, log_writer):
+    parameters = dict(parameters)
+
+    learnable = {name: param.grad.detach().norm()
+        for name, param in parameters.items() if param.grad is not None}
+
+    def filter_norm(query=None):
+        if query is not None:
+            results = [value for key, value in learnable.items() if query in key]
+        else:
+            results = list(learnable.values())
+        if not results:
+            results = [torch.tensor(0.0)]
+        return torch.norm(torch.stack(results))
+
+    log_writer.add_scalar('grad_norm/all', filter_norm(), log_writer.step)
+    log_writer.add_scalar('grad_norm/query_encoder', filter_norm('query_encoder'), log_writer.step)
+    log_writer.add_scalar('grad_norm/key_encoder', filter_norm('key_encoder'), log_writer.step)
+    log_writer.add_scalar('grad_norm/patch_embed', filter_norm('patch_embed'), log_writer.step)
+    log_writer.add_scalar('grad_norm/norm_layer', filter_norm('norm'), log_writer.step)
+    log_writer.add_scalar('grad_norm/blocks', filter_norm('blocks'), log_writer.step)
+
+    parameters = (parameters.values())
+    return parameters
+
+
 class NativeScalerWithGradNormCount:
     state_dict_key = "amp_scaler"
 
     def __init__(self):
-        self._scaler = torch.cuda.amp.GradScaler()
+        self._scaler = torch.cuda.amp.GradScaler(growth_factor=1.5)
 
     def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True, log_writer=None):
         self._scaler.scale(loss).backward(create_graph=create_graph)
 
-        parameters = list(parameters)
-        norm = [torch.norm(param.grad.detach()) for param in parameters if param.grad is not None]
-        norm = torch.norm(torch.stack(norm))
-        log_writer.add_scalar('norm/grad', norm, log_writer.step)
-        parameters = (param for param in parameters)
-
         if update_grad:
+            self._scaler.unscale_(optimizer)
+            parameters = log_gradients(parameters, log_writer)
             if clip_grad is not None:
                 assert parameters is not None
-                self._scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
                 norm = torch.nn.utils.clip_grad_norm_(parameters, clip_grad)
             else:
-                self._scaler.unscale_(optimizer)
                 norm = get_grad_norm_(parameters)
             self._scaler.step(optimizer)
             self._scaler.update()
+            log_writer.add_scalar('optim/scaler_scale', self._scaler.get_scale(), log_writer.step)
         else:
             norm = None
         return norm
