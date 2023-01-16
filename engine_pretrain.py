@@ -41,7 +41,7 @@ def train_one_epoch(model: torch.nn.Module,
         # if data_iter_step > print_freq:
         #     torch.autograd.set_detect_anomaly(True)
 
-        if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
+        if log_writer is not None:
             epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
             log_writer.step = epoch_1000x
 

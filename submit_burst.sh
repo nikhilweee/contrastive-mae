@@ -6,7 +6,7 @@
 #SBATCH --output="sbatch_logs/%A_%x.txt"
 #SBATCH --account=csci-ga-2565-2022sp
 #SBATCH --partition=n1s8-v100-1
-#SBATCH --job-name=finetune_rec
+#SBATCH --job-name=pretrain_both_mr_50
 
 
 singularity exec \
@@ -17,10 +17,10 @@ singularity exec \
     source /ext3/miniconda3/etc/profile.d/conda.sh;
     conda activate vit_mae;
     cd /home/nv2099/projects/vit_mae/mae;
-    # python -u main_pretrain.py --loss_type both --batch_size 40 \
+    python -u main_pretrain.py --mask_ratio 0.5 --accum_iter 2 --batch_size 32 --loss_type both \
+        --resume runs/scratch/pretrain_both_mr_50_77716/checkpoint-20.pth --output_dir runs/scratch/${SLURM_JOB_NAME}_${SLURM_JOB_ID};
+    # python -u main_finetune.py --batch_size 20 --finetune runs/scratch/pretrain_both_77423/checkpoint-49.pth \
     #     --output_dir runs/scratch/${SLURM_JOB_NAME}_${SLURM_JOB_ID};
-    python -u main_finetune.py --batch_size 20 --finetune runs/scratch/pretrain_rec_77226/checkpoint-49.pth \
-        --output_dir runs/scratch/${SLURM_JOB_NAME}_${SLURM_JOB_ID};
     "
 
 
